@@ -18,7 +18,14 @@ const api = async (method, body) => {
 // чаты: сохранённые + новые из getUpdates (кто написал боту)
 const chatsPath = path.join(DIR, 'telegram_chats.json');
 const chats = new Set(fs.existsSync(chatsPath) ? JSON.parse(fs.readFileSync(chatsPath, 'utf8')) : []);
+const me = await api('getMe');
+if (!me.ok) { console.log('Токен не принят Telegram:', me.description, '— проверь секрет TELEGRAM_BOT_TOKEN'); process.exit(1); }
+console.log('Бот:', '@' + me.result.username);
+const hook = await api('getWebhookInfo');
+if (hook.result?.url) { await api('deleteWebhook'); console.log('Снят webhook'); }
 const upd = await api('getUpdates', { limit: 100 });
+if (!upd.ok) console.log('getUpdates:', upd.description);
+console.log('Новых сообщений боту:', (upd.result || []).length);
 for (const u of upd.result || []) { const id = u.message?.chat?.id ?? u.my_chat_member?.chat?.id; if (id) chats.add(id); }
 fs.writeFileSync(chatsPath, JSON.stringify([...chats]));
 if (!chats.size) { console.log('Нет чатов: напиши боту /start и запусти ещё раз'); process.exit(0); }
