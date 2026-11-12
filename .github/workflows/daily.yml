@@ -2,7 +2,11 @@ name: Ежедневный сбор топов
 
 on:
   schedule:
-    - cron: '35 6 * * *'   # 09:35 по Турции (UTC+3)
+    # GitHub иногда пропускает запуски по расписанию — поэтому три попытки;
+    # если данные за сегодня уже собраны, повторные запуски ничего не делают.
+    - cron: '35 6 * * *'   # 09:35 по Турции
+    - cron: '20 7 * * *'   # 10:20 — запасной
+    - cron: '10 9 * * *'   # 12:10 — запасной
   workflow_dispatch:        # ручной запуск кнопкой «Run workflow»
 
 permissions:
@@ -19,21 +23,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Проверка — уже собрано сегодня?
+        id: check
+        run: |
+          TODAY=$(TZ=Europe/Istanbul date +%F)
+          LAST=$(cat data/last_run.txt 2>/dev/null || true)
+          if [ "$LAST" = "$TODAY" ] && [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "Данные за $TODAY уже собраны — пропускаю"; echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.check.outputs.skip != 'true'
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: collector/package-lock.json
 
       - name: Установка зависимостей
+        if: steps.check.outputs.skip != 'true'
         working-directory: collector
         run: npm ci
 
       - name: Сбор топов Google Play
+        if: steps.check.outputs.skip != 'true'
         working-directory: collector
         run: node collector.mjs ../data
 
       - name: Сводка в Telegram
+        if: steps.check.outputs.skip != 'true'
         working-directory: collector
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -41,9 +60,11 @@ jobs:
         run: node notify.mjs ../data
 
       - name: Сохранение данных
+        if: steps.check.outputs.skip != 'true'
         run: |
           git config user.name "trends-bot"
           git config user.email "trends-bot@users.noreply.github.com"
+          TZ=Europe/Istanbul date +%F > data/last_run.txt
           git add data
           git diff --cached --quiet || git commit -m "Данные за $(TZ=Europe/Istanbul date +%F)"
           git pull --rebase -X theirs origin main || true
